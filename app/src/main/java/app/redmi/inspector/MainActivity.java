@@ -137,7 +137,7 @@ public class MainActivity extends Activity {
         thisPhone.setText("جهازي");
         thisPhone.setOnClickListener(v -> {
             codenameInput.setText(Build.DEVICE == null ? "" : Build.DEVICE);
-            versionFilterInput.setText(Build.VERSION.INCREMENTAL == null ? "" : Build.VERSION.INCREMENTAL);
+            versionFilterInput.setText("");
             searchRoms();
         });
         searchButtons.addView(thisPhone, new LinearLayout.LayoutParams(0, dp(50), 1f));
@@ -235,39 +235,190 @@ public class MainActivity extends Activity {
             return;
         }
         romResults.removeAllViews();
-        romStatus.setText("جارٍ البحث عن الرومات للجهاز " + code + "…");
+        romStatus.setText("جارٍ البحث في RSS وأرشيف MIUI وHyperOS للجهاز " + code + "…");
         networkExecutor.execute(() -> {
+            ArrayList<RomEntry> all = new ArrayList<>();
+            ArrayList<String> sourceErrors = new ArrayList<>();
+            int successfulSources = 0;
+
             try {
-                String xml = fetchText(TRACKER_RSS + code + ".xml");
-                ArrayList<RomEntry> all = parseRss(xml);
-                ArrayList<RomEntry> found = new ArrayList<>();
-                for (RomEntry rom : all) {
-                    String haystack = (rom.title + "\n" + rom.description).toLowerCase(Locale.ROOT);
-                    if (filter.isEmpty() || haystack.contains(filter.toLowerCase(Locale.ROOT))) {
-                        found.add(rom);
-                    }
+                ArrayList<RomEntry> rss = parseRss(fetchText(TRACKER_RSS + code + ".xml"));
+                for (RomEntry item : rss) {
+                    item.sourceName = "RSS مجتمعي";
+                    all.add(item);
                 }
-                runOnUiThread(() -> {
-                    if (isFinishing()) return;
-                    romResults.removeAllViews();
-                    if (found.isEmpty()) {
-                        String msg = all.isEmpty()
-                                ? "لم يعثر سجل الرومات على نتائج لهذا الرمز. قد يكون الرمز غير صحيح أو لا توجد بيانات لهذا الجهاز."
-                                : "لم يُعثر على إصدار يطابق الفلتر. امسح حقل الإصدار لعرض كل النتائج.";
-                        romStatus.setText(msg);
-                        return;
-                    }
-                    romStatus.setText("عدد النتائج: " + found.size() + (filter.isEmpty() ? "" : " — تمت مطابقة رمز الإصدار/البناء"));
-                    for (RomEntry rom : found) addRomCard(rom, filter);
-                });
+                successfulSources++;
             } catch (Exception e) {
-                runOnUiThread(() -> {
-                    if (isFinishing()) return;
-                    romResults.removeAllViews();
-                    romStatus.setText("فشل الاتصال بسجل الرومات أو لم يُعثر على هذا الجهاز. تحقق من الإنترنت والرمز ثم أعد المحاولة.");
-                });
+                sourceErrors.add("RSS: " + conciseError(e));
             }
+
+            String[] archiveUrls = {
+                    "https://xmfirmwareupdater.com/archive/hyperos/" + code.toLowerCase(Locale.ROOT) + "/",
+                    "https://xmfirmwareupdater.com/archive/miui/" + code.toLowerCase(Locale.ROOT) + "/"
+            };
+            String[] archiveNames = {"أرشيف HyperOS", "أرشيف MIUI"};
+            for (int i = 0; i < archiveUrls.length; i++) {
+                try {
+                    String html = fetchText(archiveUrls[i]);
+                    ArrayList<RomEntry> archived = parseArchiveHtml(html, archiveUrls[i], archiveNames[i]);
+                    all.addAll(archived);
+                    successfulSources++;
+                } catch (Exception e) {
+                    sourceErrors.add(archiveNames[i] + ": " + conciseError(e));
+                }
+            }
+
+            ArrayList<RomEntry> unique = deduplicateRoms(all);
+            ArrayList<RomEntry> found = new ArrayList<>();
+            for (RomEntry rom : unique) {
+                String haystack = (rom.title + "\n" + rom.description + "\n" + rom.date).toLowerCase(Locale.ROOT);
+                if (filter.isEmpty() || haystack.contains(filter.toLowerCase(Locale.ROOT))) {
+                    found.add(rom);
+                }
+            }
+            found.sort((a, b) -> {
+                int dateCompare = safe(b.date).compareToIgnoreCase(safe(a.date));
+                return dateCompare != 0 ? dateCompare : a.title.compareToIgnoreCase(b.title);
+            });
+
+            final int rawCount = all.size();
+            final int uniqueCount = unique.size();
+            final int sourceCount = successfulSources;
+            final String errors = sourceErrors.isEmpty() ? "" : "\nتعذّر الوصول إلى بعض المصادر: " + String.join("؛ ", sourceErrors);
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                romResults.removeAllViews();
+                if (found.isEmpty()) {
+                    String message;
+                    if (uniqueCount == 0) {
+                        message = "لم تُسترجع نتائج من المصادر الثلاثة. تحقق من الإنترنت ورمز الجهاز. لا يعني هذا أن الجهاز لا يملك رومات منشورة.";
+                    } else {
+                        message = "لم تطابق النتائج الفلتر الحالي. امسح حقل الإصدار لعرض كل النتائج.";
+                    }
+                    romStatus.setText(message + "\nالمصادر التي استجابت: " + sourceCount + "/3" + errors);
+                    return;
+                }
+
+                java.util.LinkedHashMap<String, Integer> regionCounts = new java.util.LinkedHashMap<>();
+                for (RomEntry item : found) {
+                    String region = classifyRegion(item.title + " " + item.description);
+                    regionCounts.put(region, regionCounts.containsKey(region) ? regionCounts.get(region) + 1 : 1);
+                }
+                StringBuilder summary = new StringBuilder();
+                summary.append("النتائج المطابقة: ").append(found.size())
+                        .append(" | الفريدة قبل الفلترة: ").append(uniqueCount)
+                        .append(" | المصادر المستجيبة: ").append(sourceCount).append("/3");
+                if (!filter.isEmpty()) summary.append("\nفلتر الإصدار: ").append(filter);
+                summary.append("\nالتوزيع حسب المنطقة: ");
+                boolean first = true;
+                for (java.util.Map.Entry<String, Integer> entry : regionCounts.entrySet()) {
+                    if (!first) summary.append("، ");
+                    summary.append(entry.getKey()).append(" ").append(entry.getValue());
+                    first = false;
+                }
+                summary.append(errors);
+                romStatus.setText(summary.toString());
+                for (RomEntry rom : found) addRomCard(rom, filter);
+            });
         });
+    }
+
+    private ArrayList<RomEntry> parseArchiveHtml(String html, String archiveUrl, String sourceName) {
+        ArrayList<RomEntry> entries = new ArrayList<>();
+        if (html == null || html.isEmpty()) return entries;
+        Matcher rowMatcher = Pattern.compile("(?is)<tr\\b[^>]*>(.*?)</tr>").matcher(html);
+        Pattern cellPattern = Pattern.compile("(?is)<td\\b[^>]*>(.*?)</td>");
+        while (rowMatcher.find()) {
+            String row = rowMatcher.group(1);
+            Matcher cellMatcher = cellPattern.matcher(row);
+            ArrayList<String> cells = new ArrayList<>();
+            while (cellMatcher.find()) {
+                String cellText = stripHtml(cellMatcher.group(1));
+                if (!cellText.isEmpty()) cells.add(cellText);
+            }
+            if (cells.size() < 4) continue;
+            String joined = String.join(" | ", cells);
+            if (!extractVersion(joined).isEmpty()) {
+                RomEntry entry = new RomEntry();
+                entry.title = joined;
+                entry.link = archiveUrl;
+                entry.description = row;
+                entry.sourceName = sourceName;
+                Matcher dateMatcher = Pattern.compile("\\b20\\d{2}-\\d{2}-\\d{2}\\b").matcher(joined);
+                if (dateMatcher.find()) entry.date = dateMatcher.group();
+                entries.add(entry);
+            }
+        }
+        return entries;
+    }
+
+    private ArrayList<RomEntry> deduplicateRoms(ArrayList<RomEntry> input) {
+        java.util.LinkedHashMap<String, RomEntry> map = new java.util.LinkedHashMap<>();
+        for (RomEntry item : input) {
+            String version = extractVersion(item.title + " " + item.description);
+            String type = classifyPackageType(item.title + " " + item.description);
+            String region = classifyRegion(item.title + " " + item.description);
+            String key = !version.isEmpty()
+                    ? version.toUpperCase(Locale.ROOT) + "|" + type + "|" + region
+                    : item.title.trim().toLowerCase(Locale.ROOT);
+            RomEntry old = map.get(key);
+            if (old == null) {
+                map.put(key, item);
+            } else if ((old.description == null || old.description.isEmpty())
+                    && item.description != null && !item.description.isEmpty()) {
+                map.put(key, item);
+            }
+        }
+        return new ArrayList<>(map.values());
+    }
+
+    private String stripHtml(String html) {
+        if (html == null) return "";
+        return html.replaceAll("(?is)<script\\b.*?</script>", " ")
+                .replaceAll("(?is)<style\\b.*?</style>", " ")
+                .replaceAll("(?i)<br\\s*/?>", " ")
+                .replaceAll("(?i)</(td|th|p|div|li)>", " ")
+                .replaceAll("<[^>]+>", " ")
+                .replace("&nbsp;", " ").replace("&#39;", "'")
+                .replace("&amp;", "&").replace("&quot;", "\"")
+                .replaceAll("\\s+", " ").trim();
+    }
+
+    private String extractVersion(String text) {
+        if (text == null) return "";
+        Matcher matcher = Pattern.compile("(?i)(?:OS|V)\\d[0-9A-Z.]*?(?:EUXM|MIXM|CNXM|INXM|RUXM|TRXM|TWXM|IDXM|JPXM|KRXM|TWM|WXM|XM)").matcher(text);
+        return matcher.find() ? matcher.group().toUpperCase(Locale.ROOT) : "";
+    }
+
+    private String classifyRegion(String text) {
+        String upper = text == null ? "" : text.toUpperCase(Locale.ROOT);
+        String version = extractVersion(upper);
+        if (!version.isEmpty()) upper = version;
+        if (upper.matches("(?s).*EUXM.*")) return "EEA/أوروبا";
+        if (upper.matches("(?s).*MIXM.*")) return "Global/عالمي";
+        if (upper.matches("(?s).*CNXM.*")) return "China/الصين";
+        if (upper.matches("(?s).*INXM.*")) return "India/الهند";
+        if (upper.matches("(?s).*RUXM.*")) return "Russia/روسيا";
+        if (upper.matches("(?s).*TRXM.*")) return "Turkey/تركيا";
+        if (upper.matches("(?s).*TWXM.*")) return "Taiwan/تايوان";
+        if (upper.matches("(?s).*IDXM.*")) return "Indonesia/إندونيسيا";
+        if (upper.matches("(?s).*JPXM.*")) return "Japan/اليابان";
+        if (upper.matches("(?s).*KRXM.*")) return "Korea/كوريا";
+        return "غير محددة";
+    }
+
+    private String classifyPackageType(String text) {
+        String upper = text == null ? "" : text.toUpperCase(Locale.ROOT);
+        if (upper.contains("FASTBOOT")) return "Fastboot";
+        if (upper.contains("RECOVERY")) return "Recovery";
+        if (upper.contains("OTA") || upper.contains("INCREMENTAL")) return "OTA/تحديث جزئي";
+        return "غير محدد";
+    }
+
+    private String conciseError(Exception error) {
+        String message = error.getMessage();
+        if (message == null || message.trim().isEmpty()) return error.getClass().getSimpleName();
+        return message.length() > 90 ? message.substring(0, 90) : message;
     }
 
     private ArrayList<RomEntry> parseRss(String xml) throws Exception {
@@ -323,6 +474,25 @@ public class MainActivity extends Activity {
         heading.setTextColor(0xFF182230);
         heading.setTextIsSelectable(true);
         card.addView(heading);
+
+        TextView metadata = new TextView(this);
+        metadata.setText("المنطقة: " + classifyRegion(rom.title + " " + rom.description)
+                + " | النوع: " + classifyPackageType(rom.title + " " + rom.description)
+                + " | المصدر: " + safe(rom.sourceName));
+        metadata.setTextSize(12);
+        metadata.setTextColor(0xFF2456A6);
+        metadata.setPadding(0, dp(5), 0, dp(3));
+        card.addView(metadata);
+
+        String version = extractVersion(rom.title + " " + rom.description);
+        if (!version.isEmpty()) {
+            TextView versionView = new TextView(this);
+            versionView.setText("رمز الإصدار: " + version);
+            versionView.setTextSize(12);
+            versionView.setTextColor(0xFF344054);
+            versionView.setTextIsSelectable(true);
+            card.addView(versionView);
+        }
 
         if (rom.date != null && !rom.date.isEmpty()) {
             TextView date = new TextView(this);
@@ -392,8 +562,8 @@ public class MainActivity extends Activity {
     private String fetchText(String address) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
         connection.setRequestMethod("GET");
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(20000);
+        connection.setConnectTimeout(12000);
+        connection.setReadTimeout(15000);
         connection.setInstanceFollowRedirects(true);
         connection.setRequestProperty("User-Agent", "Redmi-System-Inspector/0.2");
         connection.setRequestProperty("Accept", "application/json, application/xml, text/xml, */*");
@@ -425,6 +595,7 @@ public class MainActivity extends Activity {
         String link = "";
         String date = "";
         String description = "";
+        String sourceName = "سجل مجتمعي";
     }
 
     private void runScan() {
