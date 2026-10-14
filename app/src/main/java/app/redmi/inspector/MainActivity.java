@@ -277,6 +277,11 @@ public class MainActivity extends Activity {
                 }
             }
             found.sort((a, b) -> {
+                int scoreCompare = Integer.compare(romMatchScore(b), romMatchScore(a));
+                if (scoreCompare != 0) return scoreCompare;
+                int versionCompare = compareRomVersions(extractVersion(b.title + " " + b.description),
+                        extractVersion(a.title + " " + a.description));
+                if (versionCompare != 0) return versionCompare;
                 int dateCompare = safe(b.date).compareToIgnoreCase(safe(a.date));
                 return dateCompare != 0 ? dateCompare : a.title.compareToIgnoreCase(b.title);
             });
@@ -410,6 +415,63 @@ public class MainActivity extends Activity {
         return "غير محددة";
     }
 
+    // Ranking is advisory: region is inferred from the installed build fingerprint, not proven original sales region.
+    private int romMatchScore(RomEntry rom) {
+        String text = rom.title + " " + rom.description;
+        String romRegion = regionCode(text);
+        String installedRegion = regionCode(safe(Build.FINGERPRINT));
+        int score = 0;
+        if (!romRegion.isEmpty() && !installedRegion.isEmpty()) {
+            if (romRegion.equals(installedRegion)) score += 1000;
+            else score -= 500;
+        } else {
+            score -= 50;
+        }
+
+        String type = classifyPackageType(text);
+        // Recovery packages are generally the more relevant comparison for normal updater flows.
+        // This does not mean the package is installable or safe to flash.
+        if ("Recovery".equals(type)) score += 20;
+        else if ("OTA/تحديث جزئي".equals(type)) score += 10;
+        else if ("Fastboot".equals(type)) score += 0;
+
+        String version = extractVersion(text);
+        if (version.startsWith("OS")) score += 5;
+        return score;
+    }
+
+    private String regionCode(String text) {
+        String upper = text == null ? "" : text.toUpperCase(Locale.ROOT);
+        String version = extractVersion(upper);
+        if (!version.isEmpty()) upper = version;
+        String[] codes = {"EUXM", "MIXM", "CNXM", "INXM", "RUXM", "TRXM", "TWXM", "IDXM", "JPXM", "KRXM"};
+        for (String code : codes) if (upper.contains(code)) return code;
+        return "";
+    }
+
+    private int compareRomVersions(String first, String second) {
+        if (first == null || first.isEmpty()) return second == null || second.isEmpty() ? 0 : -1;
+        if (second == null || second.isEmpty()) return 1;
+        // Prefer newer numeric components within the same region/build family, without treating
+        // the version string as proof of Android version or compatibility.
+        String a = first.replaceAll("(?i)^(OS|V)", "");
+        String b = second.replaceAll("(?i)^(OS|V)", "");
+        String[] aa = a.split("[^0-9]+");
+        String[] bb = b.split("[^0-9]+");
+        int count = Math.max(aa.length, bb.length);
+        for (int i = 0; i < count; i++) {
+            long av = i < aa.length && !aa[i].isEmpty() ? parseVersionPart(aa[i]) : -1;
+            long bv = i < bb.length && !bb[i].isEmpty() ? parseVersionPart(bb[i]) : -1;
+            if (av != bv) return Long.compare(av, bv);
+        }
+        return first.compareToIgnoreCase(second);
+    }
+
+    private long parseVersionPart(String value) {
+        try { return Long.parseLong(value); }
+        catch (NumberFormatException ignored) { return -1; }
+    }
+
     private String classifyPackageType(String text) {
         String upper = text == null ? "" : text.toUpperCase(Locale.ROOT);
         if (upper.contains("FASTBOOT")) return "Fastboot";
@@ -477,6 +539,24 @@ public class MainActivity extends Activity {
         heading.setTextColor(0xFF182230);
         heading.setTextIsSelectable(true);
         card.addView(heading);
+
+        String installedRegionCode = regionCode(safe(Build.FINGERPRINT));
+        String candidateRegionCode = regionCode(rom.title + " " + rom.description);
+        TextView recommendation = new TextView(this);
+        if (!installedRegionCode.isEmpty() && installedRegionCode.equals(candidateRegionCode)) {
+            recommendation.setText("الأقرب إلى جهازك حسب رمز المنطقة: أولوية أعلى للمراجعة");
+            recommendation.setTextColor(0xFF16794B);
+        } else if (!installedRegionCode.isEmpty() && !candidateRegionCode.isEmpty()) {
+            recommendation.setText("منطقة مختلفة عن بصمة النظام المثبتة — أولوية أقل");
+            recommendation.setTextColor(0xFF9A3412);
+        } else {
+            recommendation.setText("تعذّر تحديد تطابق المنطقة — لا يمكن تأكيد القرب");
+            recommendation.setTextColor(0xFF7A4D00);
+        }
+        recommendation.setTextSize(12);
+        recommendation.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        recommendation.setPadding(0, dp(5), 0, dp(3));
+        card.addView(recommendation);
 
         TextView metadata = new TextView(this);
         String romRegion = classifyRegion(rom.title + " " + rom.description);
@@ -577,7 +657,7 @@ public class MainActivity extends Activity {
         connection.setConnectTimeout(12000);
         connection.setReadTimeout(15000);
         connection.setInstanceFollowRedirects(true);
-        connection.setRequestProperty("User-Agent", "Redmi-System-Inspector/0.3.0");
+        connection.setRequestProperty("User-Agent", "Redmi-System-Inspector/0.4.0");
         connection.setRequestProperty("Accept", "application/json, application/xml, text/xml, */*");
         try {
             int status = connection.getResponseCode();
