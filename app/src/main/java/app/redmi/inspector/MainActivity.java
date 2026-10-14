@@ -615,6 +615,26 @@ public class MainActivity extends Activity {
         addItem(report, "Incremental", safe(Build.VERSION.INCREMENTAL));
         addItem(report, "بصمة البناء", safe(Build.FINGERPRINT));
 
+        java.util.Map<String, String> props = readSystemProperties();
+        addSection("خصائص النظام منخفضة المستوى (قراءة فقط)");
+        String systemFp = propertyOrUnavailable(props, "ro.system.build.fingerprint");
+        String vendorFp = propertyOrUnavailable(props, "ro.vendor.build.fingerprint");
+        addItem(report, "بصمة system", systemFp);
+        addItem(report, "بصمة vendor", vendorFp);
+        addItem(report, "اسم المنتج", propertyOrUnavailable(props, "ro.product.name"));
+        addItem(report, "طراز المنتج", propertyOrUnavailable(props, "ro.product.model"));
+        addItem(report, "جهاز المنتج", propertyOrUnavailable(props, "ro.product.device"));
+        addItem(report, "جهاز vendor", propertyOrUnavailable(props, "ro.product.vendor.device"));
+        addItem(report, "منطقة MIUI/HyperOS", propertyOrUnavailable(props, "ro.miui.region"));
+        addItem(report, "منطقة المنتج", propertyOrUnavailable(props, "ro.product.locale.region"));
+        addItem(report, "حالة Verified Boot", propertyOrUnavailable(props, "ro.boot.verifiedbootstate"));
+        addItem(report, "حالة vbmeta", propertyOrUnavailable(props, "ro.boot.vbmeta.device_state"));
+        addItem(report, "قفل التفليش", propertyOrUnavailable(props, "ro.boot.flash.locked"));
+        addItem(report, "وضع dm-verity", propertyOrUnavailable(props, "ro.boot.veritymode"));
+        addItem(report, "نوع البناء", propertyOrUnavailable(props, "ro.build.type"));
+        addItem(report, "وسوم البناء", propertyOrUnavailable(props, "ro.build.tags"));
+        addItem(report, "معرّف تعديل المنطقة", propertyOrUnavailable(props, "ro.product.mod_device"));
+
         addSection("فحص اتساق معلومات البناء");
         String fp = safe(Build.FINGERPRINT);
         String inc = safe(Build.VERSION.INCREMENTAL);
@@ -658,6 +678,34 @@ public class MainActivity extends Activity {
 
         latestReport = report.toString();
         Toast.makeText(this, "اكتمل الفحص", Toast.LENGTH_SHORT).show();
+    }
+
+
+    private java.util.Map<String, String> readSystemProperties() {
+        java.util.Map<String, String> values = new java.util.HashMap<>();
+        Process process = null;
+        try {
+            process = new ProcessBuilder("/system/bin/getprop").redirectErrorStream(true).start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                Pattern pattern = Pattern.compile("^\\[([^]]+)\\]:\\s*\\[(.*)]$");
+                while ((line = reader.readLine()) != null) {
+                    Matcher matcher = pattern.matcher(line.trim());
+                    if (matcher.matches()) values.put(matcher.group(1), matcher.group(2));
+                }
+            }
+            process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception ignored) {
+            // Some Android builds restrict process execution; all fields remain safely unavailable.
+        } finally {
+            if (process != null) process.destroy();
+        }
+        return values;
+    }
+
+    private String propertyOrUnavailable(java.util.Map<String, String> properties, String key) {
+        String value = properties.get(key);
+        return value == null || value.trim().isEmpty() ? "غير متاح للتطبيق" : value;
     }
 
     private void addSection(String text) {
