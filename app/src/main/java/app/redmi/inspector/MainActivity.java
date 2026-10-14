@@ -650,6 +650,25 @@ public class MainActivity extends Activity {
             }
         }
         addItem(report, "النتيجة", finding);
+        String systemDeviceFromFp = fingerprintDevice(systemFp);
+        String vendorDeviceFromFp = fingerprintDevice(vendorFp);
+        String publicDevice = safe(Build.DEVICE);
+        addItem(report, "مقارنة device مع بصمة system",
+                compareDeviceNames(publicDevice, systemDeviceFromFp));
+        addItem(report, "مقارنة device مع بصمة vendor",
+                compareDeviceNames(publicDevice, vendorDeviceFromFp));
+        String productDevice = props.get("ro.product.device");
+        String vendorProductDevice = props.get("ro.product.vendor.device");
+        if (productDevice != null && !productDevice.trim().isEmpty()
+                && vendorProductDevice != null && !vendorProductDevice.trim().isEmpty()) {
+            addItem(report, "مقارنة product.device مع vendor.device",
+                    compareDeviceNames(productDevice, vendorProductDevice));
+        } else {
+            addItem(report, "مقارنة product.device مع vendor.device", "لا تتوفر القيمتان للمقارنة.");
+        }
+        addItem(report, "تفسير اختلافات البناء",
+                "الاختلافات مؤشرات تحتاج إلى مقارنة مع سجل رسمي للطراز والمنطقة؛ لا تثبت وحدها أن النظام معدل أو غير أصلي.");
+
 
         addSection("تطبيق تحديث النظام");
         PackageManager pm = getPackageManager();
@@ -681,6 +700,27 @@ public class MainActivity extends Activity {
     }
 
 
+
+    private String fingerprintDevice(String fingerprint) {
+        if (fingerprint == null || fingerprint.trim().isEmpty() || "غير متاح".equals(fingerprint)
+                || "غير متاح للتطبيق".equals(fingerprint)) return "";
+        int colon = fingerprint.indexOf(':');
+        String head = colon >= 0 ? fingerprint.substring(0, colon) : fingerprint;
+        String[] parts = head.split("/");
+        return parts.length >= 3 ? parts[2] : "";
+    }
+
+    private String compareDeviceNames(String first, String second) {
+        if (first == null || second == null || first.trim().isEmpty() || second.trim().isEmpty()
+                || "غير متاح".equals(first) || "غير متاح للتطبيق".equals(first)
+                || "غير متاح".equals(second) || "غير متاح للتطبيق".equals(second)) {
+            return "غير كافٍ للمقارنة؛ إحدى القيم غير متاحة.";
+        }
+        if (first.trim().equalsIgnoreCase(second.trim())) return "متطابقان: " + first;
+        return "اختلاف: " + first + " مقابل " + second
+                + " — يحتاج إلى تحقق إضافي ولا يثبت وحده تعديل النظام.";
+    }
+
     private java.util.Map<String, String> readSystemProperties() {
         java.util.Map<String, String> values = new java.util.HashMap<>();
         Process process = null;
@@ -688,7 +728,7 @@ public class MainActivity extends Activity {
             process = new ProcessBuilder("/system/bin/getprop").redirectErrorStream(true).start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
-                Pattern pattern = Pattern.compile("^\\[([^]]+)\\]:\\s*\\[(.*)]$");
+                Pattern pattern = Pattern.compile("^\\[([^\\]]+)\\]:\\s*\\[(.*)\\]$");
                 while ((line = reader.readLine()) != null) {
                     Matcher matcher = pattern.matcher(line.trim());
                     if (matcher.matches()) values.put(matcher.group(1), matcher.group(2));
