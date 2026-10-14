@@ -52,11 +52,11 @@ public class MainActivity extends Activity {
     private String latestReport = "";
     private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
     private static final String TRACKER_API =
-            "https://api.github.com/repos/XiaomiFirmwareUpdater/miui-updates-tracker/contents/rss?per_page=1000";
+            "https://api.github.com/repos/XiaomiFirmwareUpdater/miui-updates-tracker/contents/rss";
     private static final String TRACKER_RSS =
             "https://raw.githubusercontent.com/XiaomiFirmwareUpdater/miui-updates-tracker/master/rss/";
     private static final String OFFICIAL_PORTAL =
-            "https://new.c.mi.com/global/miuidownload/index";
+            "https://new.c.mi.com/global/miuidownload/";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -137,7 +137,7 @@ public class MainActivity extends Activity {
         thisPhone.setText("جهازي");
         thisPhone.setOnClickListener(v -> {
             codenameInput.setText(Build.DEVICE == null ? "" : Build.DEVICE);
-            versionFilterInput.setText("");
+            versionFilterInput.setText(Build.VERSION.INCREMENTAL == null ? "" : Build.VERSION.INCREMENTAL);
             searchRoms();
         });
         searchButtons.addView(thisPhone, new LinearLayout.LayoutParams(0, dp(50), 1f));
@@ -197,16 +197,19 @@ public class MainActivity extends Activity {
     private void loadDeviceCodenames() {
         networkExecutor.execute(() -> {
             try {
-                String jsonText = fetchText(TRACKER_API);
-                JSONArray arr = new JSONArray(jsonText);
                 ArrayList<String> codes = new ArrayList<>();
-                for (int i = 0; i < arr.length(); i++) {
-                    JSONObject item = arr.optJSONObject(i);
-                    if (item == null) continue;
-                    String name = item.optString("name", "");
-                    if (name.toLowerCase(Locale.ROOT).endsWith(".xml")) {
-                        codes.add(name.substring(0, name.length() - 4));
+                for (int page = 1; page <= 20; page++) {
+                    String jsonText = fetchText(TRACKER_API + "?per_page=100&page=" + page);
+                    JSONArray arr = new JSONArray(jsonText);
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject item = arr.optJSONObject(i);
+                        if (item == null) continue;
+                        String name = item.optString("name", "");
+                        if (name.toLowerCase(Locale.ROOT).endsWith(".xml")) {
+                            codes.add(name.substring(0, name.length() - 4));
+                        }
                     }
+                    if (arr.length() < 100) break;
                 }
                 codes.sort(String.CASE_INSENSITIVE_ORDER);
                 runOnUiThread(() -> {
