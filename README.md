@@ -2,7 +2,7 @@
 
 An Android no-root diagnostic app with a multi-source Xiaomi ROM research catalogue.
 
-## Version 0.3.0
+## Version 0.4.0
 
 - Read-only device diagnostics using public Android build fields and, when the OS permits it, selected read-only `getprop` values.
 - Compares the public build fingerprint with system/vendor fingerprints and displays Verified Boot / vbmeta / flash-lock properties when available.
@@ -10,8 +10,10 @@ An Android no-root diagnostic app with a multi-source Xiaomi ROM research catalo
 - Loads device codenames from the public RSS index in `XiaomiFirmwareUpdater/miui-updates-tracker`.
 - Searches three sources for a device codename: its community RSS feed, the HyperOS archive page, and the MIUI archive page on XM Firmware Updater.
 - Merges duplicate version/type/region entries, supports an optional version/build filter, and reports source errors instead of silently implying that no ROM exists.
+- Ranks results using the region suffix inferred from the installed build fingerprint, then gives Recovery packages a modest review priority and compares numeric version components. The ranking is advisory and does not establish compatibility or installability.
 - Infers region from recognizable ROM suffixes (EEA, Global, China, India, Russia, Turkey, Taiwan, Indonesia, Japan, Korea) and classifies Recovery/Fastboot/OTA when evidence is present.
-- Displays source, region, package type, version code and publication date where available.
+- Displays source, region, package type, version code and publication date where available, plus a visible explanation of whether the candidate region matches the installed fingerprint.
+- Shows likely same-region candidates first; a different region is ranked lower. This is based on available build properties and does not prove the phone's original sales region.
 - Links to Xiaomi's official ROM portal.
 - Does not flash, install, unlock the bootloader, or alter system files.
 
