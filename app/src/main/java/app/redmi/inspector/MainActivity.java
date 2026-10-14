@@ -307,7 +307,10 @@ public class MainActivity extends Activity {
                 StringBuilder summary = new StringBuilder();
                 summary.append("النتائج المطابقة: ").append(found.size())
                         .append(" | الفريدة قبل الفلترة: ").append(uniqueCount)
-                        .append(" | المصادر المستجيبة: ").append(sourceCount).append("/3");
+                        .append(" | المصادر المستجيبة: ").append(sourceCount).append("/3")
+                        .append("\nنسخة الجهاز المثبتة: ").append(safe(Build.VERSION.INCREMENTAL))
+                        .append("\nمنطقة بصمة النظام: ").append(classifyRegion(safe(Build.FINGERPRINT)))
+                        .append("\nتنبيه: اختلاف المنطقة ليس حكمًا على التوافق أو توفر OTA.");
                 if (!filter.isEmpty()) summary.append("\nفلتر الإصدار: ").append(filter);
                 summary.append("\nالتوزيع حسب المنطقة: ");
                 boolean first = true;
@@ -476,8 +479,17 @@ public class MainActivity extends Activity {
         card.addView(heading);
 
         TextView metadata = new TextView(this);
-        metadata.setText("المنطقة: " + classifyRegion(rom.title + " " + rom.description)
+        String romRegion = classifyRegion(rom.title + " " + rom.description);
+        String installedRegion = classifyRegion(safe(Build.FINGERPRINT));
+        String regionComparison = "غير محدد";
+        if (!"غير محددة".equals(romRegion) && !"غير محددة".equals(installedRegion)) {
+            regionComparison = romRegion.equals(installedRegion)
+                    ? "رمز المنطقة مماثل لبصمة الجهاز"
+                    : "رمز المنطقة مختلف عن بصمة الجهاز";
+        }
+        metadata.setText("المنطقة: " + romRegion
                 + " | النوع: " + classifyPackageType(rom.title + " " + rom.description)
+                + " | " + regionComparison
                 + " | المصدر: " + safe(rom.sourceName));
         metadata.setTextSize(12);
         metadata.setTextColor(0xFF2456A6);
