@@ -577,7 +577,7 @@ public class MainActivity extends Activity {
         connection.setConnectTimeout(12000);
         connection.setReadTimeout(15000);
         connection.setInstanceFollowRedirects(true);
-        connection.setRequestProperty("User-Agent", "Redmi-System-Inspector/0.2");
+        connection.setRequestProperty("User-Agent", "Redmi-System-Inspector/0.3.0");
         connection.setRequestProperty("Accept", "application/json, application/xml, text/xml, */*");
         try {
             int status = connection.getResponseCode();
